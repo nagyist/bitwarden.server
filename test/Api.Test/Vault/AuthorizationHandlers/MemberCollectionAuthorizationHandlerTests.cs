@@ -4,7 +4,6 @@ using Bit.Core;
 using Bit.Core.Context;
 using Bit.Core.Entities;
 using Bit.Core.Enums;
-using Bit.Core.Exceptions;
 using Bit.Core.Models.Data;
 using Bit.Core.Models.Data.Organizations;
 using Bit.Core.Repositories;
@@ -27,7 +26,7 @@ public class MemberCollectionAuthorizationHandlerTests
     public async Task CanCreateAsync_WhenAdminOrOwner_Success(
         OrganizationUserType userType,
         Guid userId, SutProvider<MemberCollectionAuthorizationHandler> sutProvider,
-        ICollection<Collection> collections,
+        Collection collection,
         CurrentContextOrganization organization)
     {
         organization.Type = userType;
@@ -38,7 +37,7 @@ public class MemberCollectionAuthorizationHandlerTests
         var context = new AuthorizationHandlerContext(
             new[] { BulkCollectionOperations.Create },
             new ClaimsPrincipal(),
-            collections);
+            collection);
 
         sutProvider.GetDependency<ICurrentContext>().UserId.Returns(userId);
         sutProvider.GetDependency<ICurrentContext>().GetOrganization(organization.Id).Returns(organization);
@@ -51,7 +50,7 @@ public class MemberCollectionAuthorizationHandlerTests
     [Theory, BitAutoData, CollectionCustomization]
     public async Task CanCreateAsync_WhenUser_WithLimitCollectionCreationDeletionFalse_Success(
         SutProvider<MemberCollectionAuthorizationHandler> sutProvider,
-        ICollection<Collection> collections,
+        Collection collection,
         CurrentContextOrganization organization)
     {
         var actingUserId = Guid.NewGuid();
@@ -63,7 +62,7 @@ public class MemberCollectionAuthorizationHandlerTests
         var context = new AuthorizationHandlerContext(
             new[] { BulkCollectionOperations.Create },
             new ClaimsPrincipal(),
-            collections);
+            collection);
 
         sutProvider.GetDependency<ICurrentContext>().UserId.Returns(actingUserId);
         sutProvider.GetDependency<ICurrentContext>().GetOrganization(organization.Id).Returns(organization);
@@ -79,7 +78,7 @@ public class MemberCollectionAuthorizationHandlerTests
     public async Task CanCreateAsync_WhenMissingPermissions_NoSuccess(
         OrganizationUserType userType,
         SutProvider<MemberCollectionAuthorizationHandler> sutProvider,
-        ICollection<Collection> collections,
+        Collection collection,
         CurrentContextOrganization organization)
     {
         var actingUserId = Guid.NewGuid();
@@ -98,7 +97,7 @@ public class MemberCollectionAuthorizationHandlerTests
         var context = new AuthorizationHandlerContext(
             new[] { BulkCollectionOperations.Create },
             new ClaimsPrincipal(),
-            collections);
+            collection);
 
         sutProvider.GetDependency<ICurrentContext>().UserId.Returns(actingUserId);
         sutProvider.GetDependency<ICurrentContext>().GetOrganization(organization.Id).Returns(organization);
@@ -139,7 +138,7 @@ public class MemberCollectionAuthorizationHandlerTests
     public async Task CanReadAsync_WhenAdminOrOwner_Success(
         OrganizationUserType userType,
         Guid userId, SutProvider<MemberCollectionAuthorizationHandler> sutProvider,
-        ICollection<Collection> collections,
+        Collection collection,
         CurrentContextOrganization organization)
     {
         organization.Type = userType;
@@ -158,7 +157,7 @@ public class MemberCollectionAuthorizationHandlerTests
             var context = new AuthorizationHandlerContext(
                 new[] { BulkCollectionOperations.Read },
                 new ClaimsPrincipal(),
-                collections);
+                collection);
 
             await sutProvider.Sut.HandleAsync(context);
 
@@ -175,7 +174,7 @@ public class MemberCollectionAuthorizationHandlerTests
     public async Task CanReadAsync_WhenCustomUserWithRequiredPermissions_Success(
         bool editAnyCollection, bool deleteAnyCollection,
         SutProvider<MemberCollectionAuthorizationHandler> sutProvider,
-        ICollection<Collection> collections,
+        Collection collection,
         CurrentContextOrganization organization)
     {
         var actingUserId = Guid.NewGuid();
@@ -200,7 +199,7 @@ public class MemberCollectionAuthorizationHandlerTests
             var context = new AuthorizationHandlerContext(
                 new[] { BulkCollectionOperations.Read },
                 new ClaimsPrincipal(),
-                collections);
+                collection);
 
             await sutProvider.Sut.HandleAsync(context);
 
@@ -214,15 +213,11 @@ public class MemberCollectionAuthorizationHandlerTests
     [Theory, BitAutoData, CollectionCustomization]
     public async Task CanReadAsync_WhenUserCanManageCollections_Success(
         SutProvider<MemberCollectionAuthorizationHandler> sutProvider,
-        ICollection<CollectionDetails> collections,
+        CollectionDetails collection,
         CurrentContextOrganization organization)
     {
         var actingUserId = Guid.NewGuid();
-
-        foreach (var c in collections)
-        {
-            c.Manage = true;
-        }
+        collection.Manage = true;
 
         organization.Type = OrganizationUserType.User;
         organization.Permissions = new Permissions();
@@ -236,12 +231,14 @@ public class MemberCollectionAuthorizationHandlerTests
         {
             sutProvider.GetDependency<ICurrentContext>().UserId.Returns(actingUserId);
             sutProvider.GetDependency<ICurrentContext>().GetOrganization(organization.Id).Returns(organization);
-            sutProvider.GetDependency<ICollectionRepository>().GetManyByUserIdAsync(actingUserId, Arg.Any<bool>()).Returns(collections);
+            sutProvider.GetDependency<ICollectionRepository>()
+                .GetManyByUserIdAsync(actingUserId, Arg.Any<bool>())
+                .Returns(new [] { collection });
 
             var context = new AuthorizationHandlerContext(
                 new[] { BulkCollectionOperations.Read },
                 new ClaimsPrincipal(),
-                collections);
+                collection);
 
             await sutProvider.Sut.HandleAsync(context);
 
@@ -255,7 +252,7 @@ public class MemberCollectionAuthorizationHandlerTests
     [Theory, BitAutoData, CollectionCustomization]
     public async Task CanReadAsync_WhenUserIsNotAssignedToCollections_NoSuccess(
         SutProvider<MemberCollectionAuthorizationHandler> sutProvider,
-        ICollection<CollectionDetails> collections,
+        CollectionDetails collection,
         CurrentContextOrganization organization)
     {
         var actingUserId = Guid.NewGuid();
@@ -276,7 +273,7 @@ public class MemberCollectionAuthorizationHandlerTests
             var context = new AuthorizationHandlerContext(
                 new[] { BulkCollectionOperations.Read },
                 new ClaimsPrincipal(),
-                collections);
+                collection);
 
             await sutProvider.Sut.HandleAsync(context);
 
@@ -293,7 +290,7 @@ public class MemberCollectionAuthorizationHandlerTests
     public async Task CanReadAsync_WhenMissingPermissions_NoSuccess(
         OrganizationUserType userType,
         SutProvider<MemberCollectionAuthorizationHandler> sutProvider,
-        ICollection<Collection> collections,
+        Collection collection,
         CurrentContextOrganization organization)
     {
         var actingUserId = Guid.NewGuid();
@@ -320,7 +317,7 @@ public class MemberCollectionAuthorizationHandlerTests
             var context = new AuthorizationHandlerContext(
                 new[] { BulkCollectionOperations.Read },
                 new ClaimsPrincipal(),
-                collections);
+                collection);
 
             await sutProvider.Sut.HandleAsync(context);
 
@@ -334,7 +331,7 @@ public class MemberCollectionAuthorizationHandlerTests
     [Theory, BitAutoData, CollectionCustomization]
     public async Task CanReadAsync_WhenMissingOrgAccess_NoSuccess(
         Guid userId,
-        ICollection<Collection> collections,
+        Collection collection,
         SutProvider<MemberCollectionAuthorizationHandler> sutProvider)
     {
         var operationsToTest = new[]
@@ -350,7 +347,7 @@ public class MemberCollectionAuthorizationHandlerTests
             var context = new AuthorizationHandlerContext(
                 new[] { op },
                 new ClaimsPrincipal(),
-                collections
+                collection
             );
 
             await sutProvider.Sut.HandleAsync(context);
@@ -368,7 +365,7 @@ public class MemberCollectionAuthorizationHandlerTests
     public async Task CanReadWithAccessAsync_WhenAdminOrOwner_Success(
         OrganizationUserType userType,
         Guid userId, SutProvider<MemberCollectionAuthorizationHandler> sutProvider,
-        ICollection<Collection> collections,
+        Collection collection,
         CurrentContextOrganization organization)
     {
         organization.Type = userType;
@@ -380,7 +377,7 @@ public class MemberCollectionAuthorizationHandlerTests
         var context = new AuthorizationHandlerContext(
             new[] { BulkCollectionOperations.ReadWithAccess },
             new ClaimsPrincipal(),
-            collections);
+            collection);
 
         await sutProvider.Sut.HandleAsync(context);
 
@@ -395,7 +392,7 @@ public class MemberCollectionAuthorizationHandlerTests
     public async Task CanReadWithAccessAsync_WhenCustomUserWithRequiredPermissions_Success(
         bool editAnyCollection, bool deleteAnyCollection, bool manageUsers,
         SutProvider<MemberCollectionAuthorizationHandler> sutProvider,
-        ICollection<Collection> collections,
+        Collection collection,
         CurrentContextOrganization organization)
     {
         var actingUserId = Guid.NewGuid();
@@ -414,7 +411,7 @@ public class MemberCollectionAuthorizationHandlerTests
         var context = new AuthorizationHandlerContext(
             new[] { BulkCollectionOperations.ReadWithAccess },
             new ClaimsPrincipal(),
-            collections);
+            collection);
 
         await sutProvider.Sut.HandleAsync(context);
 
@@ -424,27 +421,25 @@ public class MemberCollectionAuthorizationHandlerTests
     [Theory, BitAutoData, CollectionCustomization]
     public async Task CanReadWithAccessAsync_WhenUserCanManageCollections_Success(
         SutProvider<MemberCollectionAuthorizationHandler> sutProvider,
-        ICollection<CollectionDetails> collections,
+        CollectionDetails collection,
         CurrentContextOrganization organization)
     {
         var actingUserId = Guid.NewGuid();
 
-        foreach (var c in collections)
-        {
-            c.Manage = true;
-        }
-
+        collection.Manage = true;
         organization.Type = OrganizationUserType.User;
         organization.Permissions = new Permissions();
 
         sutProvider.GetDependency<ICurrentContext>().UserId.Returns(actingUserId);
         sutProvider.GetDependency<ICurrentContext>().GetOrganization(organization.Id).Returns(organization);
-        sutProvider.GetDependency<ICollectionRepository>().GetManyByUserIdAsync(actingUserId, Arg.Any<bool>()).Returns(collections);
+        sutProvider.GetDependency<ICollectionRepository>()
+            .GetManyByUserIdAsync(actingUserId, Arg.Any<bool>())
+            .Returns(new [] {collection});
 
         var context = new AuthorizationHandlerContext(
             new[] { BulkCollectionOperations.ReadWithAccess },
             new ClaimsPrincipal(),
-            collections);
+            collection);
 
         await sutProvider.Sut.HandleAsync(context);
 
@@ -454,27 +449,26 @@ public class MemberCollectionAuthorizationHandlerTests
     [Theory, BitAutoData, CollectionCustomization]
     public async Task CanReadWithAccessAsync_WhenUserCanNotManageCollections_Success(
         SutProvider<MemberCollectionAuthorizationHandler> sutProvider,
-        ICollection<CollectionDetails> collections,
+        CollectionDetails collection,
         CurrentContextOrganization organization)
     {
         var actingUserId = Guid.NewGuid();
 
-        foreach (var c in collections)
-        {
-            c.Manage = false;
-        }
+        collection.Manage = false;
 
         organization.Type = OrganizationUserType.User;
         organization.Permissions = new Permissions();
 
         sutProvider.GetDependency<ICurrentContext>().UserId.Returns(actingUserId);
         sutProvider.GetDependency<ICurrentContext>().GetOrganization(organization.Id).Returns(organization);
-        sutProvider.GetDependency<ICollectionRepository>().GetManyByUserIdAsync(actingUserId, Arg.Any<bool>()).Returns(collections);
+        sutProvider.GetDependency<ICollectionRepository>()
+            .GetManyByUserIdAsync(actingUserId, Arg.Any<bool>())
+            .Returns(new [] { collection });
 
         var context = new AuthorizationHandlerContext(
             new[] { BulkCollectionOperations.ReadWithAccess },
             new ClaimsPrincipal(),
-            collections);
+            collection);
 
         await sutProvider.Sut.HandleAsync(context);
 
@@ -487,7 +481,7 @@ public class MemberCollectionAuthorizationHandlerTests
     public async Task CanReadWithAccessAsync_WhenMissingPermissions_NoSuccess(
         OrganizationUserType userType,
         SutProvider<MemberCollectionAuthorizationHandler> sutProvider,
-        ICollection<Collection> collections,
+        Collection collection,
         CurrentContextOrganization organization)
     {
         var actingUserId = Guid.NewGuid();
@@ -507,7 +501,7 @@ public class MemberCollectionAuthorizationHandlerTests
         var context = new AuthorizationHandlerContext(
             new[] { BulkCollectionOperations.ReadWithAccess },
             new ClaimsPrincipal(),
-            collections);
+            collection);
 
         await sutProvider.Sut.HandleAsync(context);
 
@@ -517,7 +511,7 @@ public class MemberCollectionAuthorizationHandlerTests
     [Theory, BitAutoData, CollectionCustomization]
     public async Task CanReadWithAccessAsync_WhenMissingOrgAccess_NoSuccess(
         Guid userId,
-        ICollection<Collection> collections,
+        Collection collection,
         SutProvider<MemberCollectionAuthorizationHandler> sutProvider)
     {
         sutProvider.GetDependency<ICurrentContext>().UserId.Returns(userId);
@@ -526,7 +520,7 @@ public class MemberCollectionAuthorizationHandlerTests
         var context = new AuthorizationHandlerContext(
             new[] { BulkCollectionOperations.ReadWithAccess },
             new ClaimsPrincipal(),
-            collections
+            collection
         );
 
         await sutProvider.Sut.HandleAsync(context);
@@ -540,7 +534,7 @@ public class MemberCollectionAuthorizationHandlerTests
     public async Task CanUpdateCollection_WhenAdminOrOwner_WithoutV1Enabled_Success(
         OrganizationUserType userType,
         Guid userId, SutProvider<MemberCollectionAuthorizationHandler> sutProvider,
-        ICollection<Collection> collections,
+        Collection collection,
         CurrentContextOrganization organization)
     {
         organization.Type = userType;
@@ -559,7 +553,7 @@ public class MemberCollectionAuthorizationHandlerTests
             var context = new AuthorizationHandlerContext(
                 new[] { op },
                 new ClaimsPrincipal(),
-                collections);
+                collection);
 
             await sutProvider.Sut.HandleAsync(context);
 
@@ -576,7 +570,7 @@ public class MemberCollectionAuthorizationHandlerTests
     public async Task CanUpdateCollection_WhenAdminOrOwner_WithV1Enabled_PermittedByCollectionManagementSettings_Success(
         OrganizationUserType userType,
         Guid userId, SutProvider<MemberCollectionAuthorizationHandler> sutProvider,
-        ICollection<Collection> collections, CurrentContextOrganization organization,
+        Collection collection, CurrentContextOrganization organization,
         OrganizationAbility organizationAbility)
     {
         organization.Type = userType;
@@ -600,7 +594,7 @@ public class MemberCollectionAuthorizationHandlerTests
             var context = new AuthorizationHandlerContext(
                 new[] { op },
                 new ClaimsPrincipal(),
-                collections);
+                collection);
 
             await sutProvider.Sut.HandleAsync(context);
 
@@ -617,7 +611,7 @@ public class MemberCollectionAuthorizationHandlerTests
     public async Task CanUpdateCollection_WhenAdminOrOwner_WithV1Enabled_NotPermittedByCollectionManagementSettings_Failure(
         OrganizationUserType userType,
         Guid userId, SutProvider<MemberCollectionAuthorizationHandler> sutProvider,
-        ICollection<Collection> collections, CurrentContextOrganization organization,
+        Collection collection, CurrentContextOrganization organization,
         OrganizationAbility organizationAbility)
     {
         organization.Type = userType;
@@ -641,7 +635,7 @@ public class MemberCollectionAuthorizationHandlerTests
             var context = new AuthorizationHandlerContext(
                 new[] { op },
                 new ClaimsPrincipal(),
-                collections);
+                collection);
 
             await sutProvider.Sut.HandleAsync(context);
 
@@ -655,7 +649,7 @@ public class MemberCollectionAuthorizationHandlerTests
     [Theory, BitAutoData, CollectionCustomization]
     public async Task CanUpdateCollection_WithEditAnyCollectionPermission_Success(
         SutProvider<MemberCollectionAuthorizationHandler> sutProvider,
-        ICollection<Collection> collections,
+        Collection collection,
         CurrentContextOrganization organization)
     {
         var actingUserId = Guid.NewGuid();
@@ -679,7 +673,7 @@ public class MemberCollectionAuthorizationHandlerTests
             var context = new AuthorizationHandlerContext(
                 new[] { op },
                 new ClaimsPrincipal(),
-                collections);
+                collection);
 
             await sutProvider.Sut.HandleAsync(context);
 
@@ -693,18 +687,14 @@ public class MemberCollectionAuthorizationHandlerTests
     [Theory, BitAutoData, CollectionCustomization]
     public async Task CanUpdateCollection_WithManageCollectionPermission_Success(
         SutProvider<MemberCollectionAuthorizationHandler> sutProvider,
-        ICollection<CollectionDetails> collections,
+        CollectionDetails collection,
         CurrentContextOrganization organization)
     {
         var actingUserId = Guid.NewGuid();
 
         organization.Type = OrganizationUserType.User;
         organization.Permissions = new Permissions();
-
-        foreach (var c in collections)
-        {
-            c.Manage = true;
-        }
+        collection.Manage = true;
 
         var operationsToTest = new[]
         {
@@ -715,12 +705,14 @@ public class MemberCollectionAuthorizationHandlerTests
         {
             sutProvider.GetDependency<ICurrentContext>().UserId.Returns(actingUserId);
             sutProvider.GetDependency<ICurrentContext>().GetOrganization(organization.Id).Returns(organization);
-            sutProvider.GetDependency<ICollectionRepository>().GetManyByUserIdAsync(actingUserId, Arg.Any<bool>()).Returns(collections);
+            sutProvider.GetDependency<ICollectionRepository>()
+                .GetManyByUserIdAsync(actingUserId, Arg.Any<bool>())
+                .Returns(new [] { collection});
 
             var context = new AuthorizationHandlerContext(
                 new[] { op },
                 new ClaimsPrincipal(),
-                collections);
+                collection);
 
             await sutProvider.Sut.HandleAsync(context);
 
@@ -737,7 +729,7 @@ public class MemberCollectionAuthorizationHandlerTests
     public async Task CanUpdateCollection_WhenMissingPermissions_NoSuccess(
         OrganizationUserType userType,
         SutProvider<MemberCollectionAuthorizationHandler> sutProvider,
-        ICollection<CollectionDetails> collections,
+        CollectionDetails collection,
         CurrentContextOrganization organization)
     {
         var actingUserId = Guid.NewGuid();
@@ -751,12 +743,7 @@ public class MemberCollectionAuthorizationHandlerTests
             ManageUsers = false
         };
 
-        foreach (var collectionDetail in collections)
-        {
-            collectionDetail.Manage = true;
-        }
-        // Simulate one collection missing the manage permission
-        collections.First().Manage = false;
+        collection.Manage = false;
 
         var operationsToTest = new[]
         {
@@ -771,7 +758,7 @@ public class MemberCollectionAuthorizationHandlerTests
             var context = new AuthorizationHandlerContext(
                 new[] { op },
                 new ClaimsPrincipal(),
-                collections);
+                collection);
 
             await sutProvider.Sut.HandleAsync(context);
 
@@ -785,7 +772,7 @@ public class MemberCollectionAuthorizationHandlerTests
     [Theory, BitAutoData, CollectionCustomization]
     public async Task CanUpdateCollection_WhenMissingOrgAccess_NoSuccess(
         Guid userId,
-        ICollection<Collection> collections,
+        Collection collection,
         SutProvider<MemberCollectionAuthorizationHandler> sutProvider)
     {
         var operationsToTest = new[]
@@ -801,7 +788,7 @@ public class MemberCollectionAuthorizationHandlerTests
             var context = new AuthorizationHandlerContext(
                 new[] { op },
                 new ClaimsPrincipal(),
-                collections
+                collection
             );
 
             await sutProvider.Sut.HandleAsync(context);
@@ -819,7 +806,7 @@ public class MemberCollectionAuthorizationHandlerTests
     public async Task CanDeleteAsync_WhenAdminOrOwner_Success(
         OrganizationUserType userType,
         Guid userId, SutProvider<MemberCollectionAuthorizationHandler> sutProvider,
-        ICollection<Collection> collections,
+        Collection collection,
         CurrentContextOrganization organization)
     {
         organization.Type = userType;
@@ -830,7 +817,7 @@ public class MemberCollectionAuthorizationHandlerTests
         var context = new AuthorizationHandlerContext(
             new[] { BulkCollectionOperations.Delete },
             new ClaimsPrincipal(),
-            collections);
+            collection);
 
         sutProvider.GetDependency<ICurrentContext>().UserId.Returns(userId);
         sutProvider.GetDependency<ICurrentContext>().GetOrganization(organization.Id).Returns(organization);
@@ -843,7 +830,7 @@ public class MemberCollectionAuthorizationHandlerTests
     [Theory, BitAutoData, CollectionCustomization]
     public async Task CanDeleteAsync_WithDeleteAnyCollectionPermission_Success(
         SutProvider<MemberCollectionAuthorizationHandler> sutProvider,
-        ICollection<Collection> collections,
+        Collection collection,
         CurrentContextOrganization organization)
     {
         var actingUserId = Guid.NewGuid();
@@ -859,7 +846,7 @@ public class MemberCollectionAuthorizationHandlerTests
         var context = new AuthorizationHandlerContext(
             new[] { BulkCollectionOperations.Delete },
             new ClaimsPrincipal(),
-            collections);
+            collection);
 
         sutProvider.GetDependency<ICurrentContext>().UserId.Returns(actingUserId);
         sutProvider.GetDependency<ICurrentContext>().GetOrganization(organization.Id).Returns(organization);
@@ -872,7 +859,7 @@ public class MemberCollectionAuthorizationHandlerTests
     [Theory, BitAutoData, CollectionCustomization]
     public async Task CanDeleteAsync_WithManageCollectionPermission_Success(
         SutProvider<MemberCollectionAuthorizationHandler> sutProvider,
-        ICollection<CollectionDetails> collections,
+        CollectionDetails collection,
         CurrentContextOrganization organization)
     {
         var actingUserId = Guid.NewGuid();
@@ -884,17 +871,16 @@ public class MemberCollectionAuthorizationHandlerTests
 
         sutProvider.GetDependency<ICurrentContext>().UserId.Returns(actingUserId);
         sutProvider.GetDependency<ICurrentContext>().GetOrganization(organization.Id).Returns(organization);
-        sutProvider.GetDependency<ICollectionRepository>().GetManyByUserIdAsync(actingUserId, Arg.Any<bool>()).Returns(collections);
+        sutProvider.GetDependency<ICollectionRepository>()
+            .GetManyByUserIdAsync(actingUserId, Arg.Any<bool>())
+            .Returns(new[] {collection});
 
-        foreach (var c in collections)
-        {
-            c.Manage = true;
-        }
+        collection.Manage = true;
 
         var context = new AuthorizationHandlerContext(
                 new[] { BulkCollectionOperations.Delete },
                 new ClaimsPrincipal(),
-                collections);
+                collection);
 
         await sutProvider.Sut.HandleAsync(context);
 
@@ -907,7 +893,7 @@ public class MemberCollectionAuthorizationHandlerTests
     public async Task CanDeleteAsync_WhenMissingPermissions_NoSuccess(
         OrganizationUserType userType,
         SutProvider<MemberCollectionAuthorizationHandler> sutProvider,
-        ICollection<Collection> collections,
+        Collection collection,
         CurrentContextOrganization organization)
     {
         var actingUserId = Guid.NewGuid();
@@ -926,7 +912,7 @@ public class MemberCollectionAuthorizationHandlerTests
         var context = new AuthorizationHandlerContext(
             new[] { BulkCollectionOperations.Delete },
             new ClaimsPrincipal(),
-            collections);
+            collection);
 
         sutProvider.GetDependency<ICurrentContext>().UserId.Returns(actingUserId);
         sutProvider.GetDependency<ICurrentContext>().GetOrganization(organization.Id).Returns(organization);
@@ -940,13 +926,13 @@ public class MemberCollectionAuthorizationHandlerTests
     [Theory, BitAutoData, CollectionCustomization]
     public async Task CanDeleteAsync_WhenMissingOrgAccess_NoSuccess(
         Guid userId,
-        ICollection<Collection> collections,
+        Collection collection,
         SutProvider<MemberCollectionAuthorizationHandler> sutProvider)
     {
         var context = new AuthorizationHandlerContext(
             new[] { BulkCollectionOperations.Delete },
             new ClaimsPrincipal(),
-            collections
+            collection
         );
 
         sutProvider.GetDependency<ICurrentContext>().UserId.Returns(userId);
@@ -955,100 +941,6 @@ public class MemberCollectionAuthorizationHandlerTests
 
         await sutProvider.Sut.HandleAsync(context);
         Assert.False(context.HasSucceeded);
-    }
-
-    [Theory, BitAutoData, CollectionCustomization]
-    public async Task HandleRequirementAsync_MissingUserId_Failure(
-        SutProvider<MemberCollectionAuthorizationHandler> sutProvider,
-        ICollection<Collection> collections)
-    {
-        var context = new AuthorizationHandlerContext(
-            new[] { BulkCollectionOperations.Create },
-            new ClaimsPrincipal(),
-            collections
-        );
-
-        // Simulate missing user id
-        sutProvider.GetDependency<ICurrentContext>().UserId.Returns((Guid?)null);
-
-        await sutProvider.Sut.HandleAsync(context);
-        Assert.True(context.HasFailed);
-        sutProvider.GetDependency<ICollectionRepository>().DidNotReceiveWithAnyArgs();
-    }
-
-    [Theory, BitAutoData, CollectionCustomization]
-    public async Task HandleRequirementAsync_TargetCollectionsMultipleOrgs_Exception(
-        SutProvider<MemberCollectionAuthorizationHandler> sutProvider,
-        IList<Collection> collections)
-    {
-        var actingUserId = Guid.NewGuid();
-
-        // Simulate a collection in a different organization
-        collections.First().OrganizationId = Guid.NewGuid();
-
-        var context = new AuthorizationHandlerContext(
-            new[] { BulkCollectionOperations.Create },
-            new ClaimsPrincipal(),
-            collections
-        );
-
-        sutProvider.GetDependency<ICurrentContext>().UserId.Returns(actingUserId);
-
-        var exception = await Assert.ThrowsAsync<BadRequestException>(() => sutProvider.Sut.HandleAsync(context));
-        Assert.Equal("Requested collections must belong to the same organization.", exception.Message);
-        sutProvider.GetDependency<ICurrentContext>().DidNotReceiveWithAnyArgs().GetOrganization(default);
-    }
-
-    [Theory, BitAutoData, CollectionCustomization]
-    public async Task HandleRequirementAsync_Provider_Success(
-        SutProvider<MemberCollectionAuthorizationHandler> sutProvider,
-        ICollection<Collection> collections)
-    {
-        var actingUserId = Guid.NewGuid();
-        var orgId = collections.First().OrganizationId;
-
-        var organizationAbilities = new Dictionary<Guid, OrganizationAbility>
-        {
-            { collections.First().OrganizationId,
-                new OrganizationAbility
-                {
-                    LimitCollectionCreationDeletion = true
-                }
-            }
-        };
-
-        var operationsToTest = new[]
-        {
-            BulkCollectionOperations.Create,
-            BulkCollectionOperations.Read,
-            BulkCollectionOperations.ReadAccess,
-            BulkCollectionOperations.Update,
-            BulkCollectionOperations.ModifyAccess,
-            BulkCollectionOperations.Delete,
-        };
-
-        foreach (var op in operationsToTest)
-        {
-            sutProvider.GetDependency<ICurrentContext>().UserId.Returns(actingUserId);
-            sutProvider.GetDependency<ICurrentContext>().GetOrganization(orgId).Returns((CurrentContextOrganization)null);
-            sutProvider.GetDependency<IApplicationCacheService>().GetOrganizationAbilitiesAsync()
-                .Returns(organizationAbilities);
-            sutProvider.GetDependency<ICurrentContext>().ProviderUserForOrgAsync(Arg.Any<Guid>()).Returns(true);
-
-            var context = new AuthorizationHandlerContext(
-                new[] { op },
-                new ClaimsPrincipal(),
-                collections
-            );
-
-            await sutProvider.Sut.HandleAsync(context);
-
-            Assert.True(context.HasSucceeded);
-            await sutProvider.GetDependency<ICurrentContext>().Received().ProviderUserForOrgAsync(orgId);
-
-            // Recreate the SUT to reset the mocks/dependencies between tests
-            sutProvider.Recreate();
-        }
     }
 
     [Theory, BitAutoData, CollectionCustomization]
