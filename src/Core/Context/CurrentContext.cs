@@ -560,6 +560,12 @@ public class CurrentContext : ICurrentContext
 
     protected async Task<IEnumerable<ProviderUserOrganizationDetails>> GetProviderUserOrganizations()
     {
+        if (!Providers.Any())
+        {
+            // If the user is not a providerUser for any provider, they can't have a provider relationship with an org
+            return Array.Empty<ProviderUserOrganizationDetails>();
+        }
+
         if (_providerUserOrganizations == null && UserId.HasValue)
         {
             _providerUserOrganizations = await _providerUserRepository.GetManyOrganizationDetailsByUserAsync(UserId.Value, ProviderUserStatusType.Confirmed);

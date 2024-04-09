@@ -43,6 +43,13 @@ public class BulkCollectionAuthorizationHandler : AuthorizationHandler<BulkColle
             return;
         }
 
+        var org = _currentContext.GetOrganization(resource.OrganizationId);
+        if (org == null)
+        {
+            // User is not a member of the org and cannot be authorized by this handler
+            return;
+        }
+
         switch (requirement)
         {
             case not null when requirement == BulkCollectionOperations.Create:
@@ -88,13 +95,6 @@ public class BulkCollectionAuthorizationHandler : AuthorizationHandler<BulkColle
         if (await GetOrganizationAbilityAsync(org) is { LimitCollectionCreationDeletion: false })
         {
             context.Succeed(requirement);
-            return;
-        }
-
-        // Allow provider users to create collections if they are a provider for the target organization
-        if (await _currentContext.ProviderUserForOrgAsync(resource.OrganizationId))
-        {
-            context.Succeed(requirement);
         }
     }
 
@@ -121,14 +121,7 @@ public class BulkCollectionAuthorizationHandler : AuthorizationHandler<BulkColle
             if (canManageCollections)
             {
                 context.Succeed(requirement);
-                return;
             }
-        }
-
-        // Allow provider users to read collections if they are a provider for the target organization
-        if (await _currentContext.ProviderUserForOrgAsync(resource.OrganizationId))
-        {
-            context.Succeed(requirement);
         }
     }
 
@@ -156,14 +149,7 @@ public class BulkCollectionAuthorizationHandler : AuthorizationHandler<BulkColle
             if (canManageCollections)
             {
                 context.Succeed(requirement);
-                return;
             }
-        }
-
-        // Allow provider users to read collections if they are a provider for the target organization
-        if (await _currentContext.ProviderUserForOrgAsync(resource.OrganizationId))
-        {
-            context.Succeed(requirement);
         }
     }
 
@@ -200,14 +186,7 @@ public class BulkCollectionAuthorizationHandler : AuthorizationHandler<BulkColle
             if (canManageCollections)
             {
                 context.Succeed(requirement);
-                return;
             }
-        }
-
-        // Allow providers to manage collections if they are a provider for the target organization
-        if (await _currentContext.ProviderUserForOrgAsync(resource.OrganizationId))
-        {
-            context.Succeed(requirement);
         }
     }
 
@@ -234,14 +213,7 @@ public class BulkCollectionAuthorizationHandler : AuthorizationHandler<BulkColle
             if (canManageCollections)
             {
                 context.Succeed(requirement);
-                return;
             }
-        }
-
-        // Allow providers to delete collections if they are a provider for the target organization
-        if (await _currentContext.ProviderUserForOrgAsync(resource.OrganizationId))
-        {
-            context.Succeed(requirement);
         }
     }
 
