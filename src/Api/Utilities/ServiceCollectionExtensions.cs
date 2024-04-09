@@ -97,7 +97,8 @@ public static class ServiceCollectionExtensions
 
     public static void AddAuthorizationHandlers(this IServiceCollection services)
     {
-        services.AddScoped<IAuthorizationHandler, BulkCollectionAuthorizationHandler>();
+        services.AddScoped<IAuthorizationHandler, MemberCollectionAuthorizationHandler>();
+        services.AddScoped<IAuthorizationHandler, ProviderCollectionAuthorizationHandler>();
         services.AddScoped<IAuthorizationHandler, CollectionAuthorizationHandler>();
         services.AddScoped<IAuthorizationHandler, GroupAuthorizationHandler>();
         services.AddScoped<IAuthorizationHandler, OrganizationUserAuthorizationHandler>();

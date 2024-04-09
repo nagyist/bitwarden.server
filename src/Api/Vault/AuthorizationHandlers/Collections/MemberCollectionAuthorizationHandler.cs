@@ -14,7 +14,7 @@ namespace Bit.Api.Vault.AuthorizationHandlers.Collections;
 /// Handles authorization logic for Collection objects, including access permissions for users and groups.
 /// This uses new logic implemented in the Flexible Collections initiative.
 /// </summary>
-public class BulkCollectionAuthorizationHandler : AuthorizationHandler<BulkCollectionOperationRequirement, Collection>
+public class MemberCollectionAuthorizationHandler : AuthorizationHandler<BulkCollectionOperationRequirement, Collection>
 {
     private readonly ICurrentContext _currentContext;
     private readonly ICollectionRepository _collectionRepository;
@@ -22,7 +22,7 @@ public class BulkCollectionAuthorizationHandler : AuthorizationHandler<BulkColle
     private readonly IFeatureService _featureService;
     private HashSet<Guid>? _managedCollectionsIds;
 
-    public BulkCollectionAuthorizationHandler(
+    public MemberCollectionAuthorizationHandler(
         ICurrentContext currentContext,
         ICollectionRepository collectionRepository,
         IApplicationCacheService applicationCacheService,
