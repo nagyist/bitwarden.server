@@ -92,7 +92,7 @@ public class MemberCollectionAuthorizationHandler : AuthorizationHandler<BulkCol
         }
 
         // If the limit collection management setting is disabled, allow any user to create collections
-        if (await GetOrganizationAbilityAsync(org) is { LimitCollectionCreationDeletion: false })
+        if (await GetOrganizationAbilityAsync(resource) is { LimitCollectionCreationDeletion: false })
         {
             context.Succeed(requirement);
         }
@@ -170,7 +170,7 @@ public class MemberCollectionAuthorizationHandler : AuthorizationHandler<BulkCol
         }
 
         // If V1 is enabled, Owners and Admins can update any collection only if permitted by collection management settings
-        var organizationAbility = await GetOrganizationAbilityAsync(org);
+        var organizationAbility = await GetOrganizationAbilityAsync(resource);
         if ((organizationAbility is { AllowAdminAccessToAllCollectionItems: true } || !_featureService.IsEnabled(FeatureFlagKeys.FlexibleCollectionsV1)) &&
             org is { Type: OrganizationUserType.Owner or OrganizationUserType.Admin })
         {
@@ -207,7 +207,7 @@ public class MemberCollectionAuthorizationHandler : AuthorizationHandler<BulkCol
         // Check for non-null org here: the user must be apart of the organization for this setting to take affect
         // The limit collection management setting is disabled,
         // ensure acting user has manage permissions for all collections being deleted
-        if (await GetOrganizationAbilityAsync(org) is { LimitCollectionCreationDeletion: false })
+        if (await GetOrganizationAbilityAsync(resource) is { LimitCollectionCreationDeletion: false })
         {
             var canManageCollections = await CanManageCollectionAsync(resource);
             if (canManageCollections)
@@ -232,15 +232,8 @@ public class MemberCollectionAuthorizationHandler : AuthorizationHandler<BulkCol
         return _managedCollectionsIds.Contains(targetCollection.Id);
     }
 
-    private async Task<OrganizationAbility?> GetOrganizationAbilityAsync(CurrentContextOrganization? organization)
+    private async Task<OrganizationAbility?> GetOrganizationAbilityAsync(Collection resource)
     {
-        // If the CurrentContextOrganization is null, then the user isn't a member of the org so the setting is
-        // irrelevant
-        if (organization == null)
-        {
-            return null;
-        }
-
-        return await _applicationCacheService.GetOrganizationAbilityAsync(organization.Id);
+        return await _applicationCacheService.GetOrganizationAbilityAsync(resource.OrganizationId);
     }
 }
