@@ -1,8 +1,8 @@
 ﻿using Bit.Core.AdminConsole.Entities;
 using Bit.Core.Billing.Caches;
 using Bit.Core.Billing.Constants;
-using Bit.Core.Billing.Enums;
 using Bit.Core.Billing.Models;
+using Bit.Core.Billing.Models.Sales;
 using Bit.Core.Enums;
 using Bit.Core.Exceptions;
 using Bit.Core.Repositories;
@@ -19,6 +19,8 @@ using Subscription = Stripe.Subscription;
 
 namespace Bit.Core.Billing.Services.Implementations;
 
+#nullable enable
+
 public class OrganizationBillingService(
     IBraintreeGateway braintreeGateway,
     IGlobalSettings globalSettings,
@@ -28,7 +30,30 @@ public class OrganizationBillingService(
     IStripeAdapter stripeAdapter,
     ISubscriberService subscriberService) : IOrganizationBillingService
 {
-    public async Task<OrganizationMetadata> GetMetadata(Guid organizationId)
+    public async Task Finalize(OrganizationSale sale)
+    {
+        var (organization, customerSetup, subscriptionSetup) = sale;
+
+        var customer = string.IsNullOrEmpty(organization.GatewayCustomerId) && customerSetup != null
+            ? await CreateCustomerAsync(organization, customerSetup)
+            : await subscriberService.GetCustomerOrThrow(organization, new CustomerGetOptions { Expand = ["tax"] });
+
+        var subscription = await CreateSubscriptionAsync(organization.Id, customer, subscriptionSetup);
+
+        if (subscription.Status is StripeConstants.SubscriptionStatus.Trialing or StripeConstants.SubscriptionStatus.Active)
+        {
+            organization.Enabled = true;
+            organization.ExpirationDate = subscription.CurrentPeriodEnd;
+        }
+
+        organization.Gateway = GatewayType.Stripe;
+        organization.GatewayCustomerId = customer.Id;
+        organization.GatewaySubscriptionId = subscription.Id;
+
+        await organizationRepository.ReplaceAsync(organization);
+    }
+
+    public async Task<OrganizationMetadata?> GetMetadata(Guid organizationId)
     {
         var organization = await organizationRepository.GetByIdAsync(organizationId);
 
@@ -54,94 +79,43 @@ public class OrganizationBillingService(
         return new OrganizationMetadata(isOnSecretsManagerStandalone);
     }
 
-    public async Task PurchaseSubscription(
+    public async Task UpdatePaymentMethod(
         Organization organization,
-        OrganizationSubscriptionPurchase organizationSubscriptionPurchase)
+        TokenizedPaymentSource tokenizedPaymentSource,
+        TaxInformation taxInformation)
     {
-        ArgumentNullException.ThrowIfNull(organization);
-        ArgumentNullException.ThrowIfNull(organizationSubscriptionPurchase);
+        if (string.IsNullOrEmpty(organization.GatewayCustomerId))
+        {
+            var customer = await CreateCustomerAsync(organization,
+                new CustomerSetup
+                {
+                    TokenizedPaymentSource = tokenizedPaymentSource,
+                    TaxInformation = taxInformation
+                });
 
-        var (
-            metadata,
-            passwordManager,
-            paymentSource,
-            planType,
-            secretsManager,
-            taxInformation) = organizationSubscriptionPurchase;
+            organization.Gateway = GatewayType.Stripe;
+            organization.GatewayCustomerId = customer.Id;
 
-        var customer = await CreateCustomerAsync(organization, metadata, paymentSource, taxInformation);
-
-        var subscription =
-            await CreateSubscriptionAsync(customer, organization.Id, passwordManager, planType, secretsManager);
-
-        organization.Enabled = true;
-        organization.ExpirationDate = subscription.CurrentPeriodEnd;
-        organization.Gateway = GatewayType.Stripe;
-        organization.GatewayCustomerId = customer.Id;
-        organization.GatewaySubscriptionId = subscription.Id;
-
-        await organizationRepository.ReplaceAsync(organization);
+            await organizationRepository.ReplaceAsync(organization);
+        }
+        else
+        {
+            await subscriberService.UpdatePaymentSource(organization, tokenizedPaymentSource);
+            await subscriberService.UpdateTaxInformation(organization, taxInformation);
+        }
     }
 
     #region Utilities
 
     private async Task<Customer> CreateCustomerAsync(
         Organization organization,
-        OrganizationSubscriptionPurchaseMetadata metadata,
-        TokenizedPaymentSource paymentSource,
-        TaxInformation taxInformation)
+        CustomerSetup customerSetup)
     {
-        if (paymentSource == null)
-        {
-            logger.LogError(
-                "Cannot create customer for organization ({OrganizationID}) without a payment source",
-                organization.Id);
-
-            throw new BillingException();
-        }
-
-        if (taxInformation is not { Country: not null, PostalCode: not null })
-        {
-            logger.LogError(
-                "Cannot create customer for organization ({OrganizationID}) without both a country and postal code",
-                organization.Id);
-
-            throw new BillingException();
-        }
-
-        var (
-            country,
-            postalCode,
-            taxId,
-            line1,
-            line2,
-            city,
-            state) = taxInformation;
-
-        var address = new AddressOptions
-        {
-            Country = country,
-            PostalCode = postalCode,
-            City = city,
-            Line1 = line1,
-            Line2 = line2,
-            State = state
-        };
-
-        var (fromProvider, fromSecretsManagerStandalone) = metadata ?? OrganizationSubscriptionPurchaseMetadata.Default;
-
-        var coupon = fromProvider
-            ? StripeConstants.CouponIDs.MSPDiscount35
-            : fromSecretsManagerStandalone
-                ? StripeConstants.CouponIDs.SecretsManagerStandalone
-                : null;
-
-        var organizationDisplayName = organization.DisplayName();
+        var displayName = organization.DisplayName();
 
         var customerCreateOptions = new CustomerCreateOptions
         {
-            Address = address,
-            Coupon = coupon,
+            Coupon = customerSetup.Coupon,
             Description = organization.DisplayBusinessName(),
             Email = organization.BillingEmail,
             Expand = ["tax"],
@@ -151,77 +125,91 @@ public class OrganizationBillingService(
                     new CustomerInvoiceSettingsCustomFieldOptions
                     {
                         Name = organization.SubscriberType(),
-                        Value = organizationDisplayName.Length <= 30
-                            ? organizationDisplayName
-                            : organizationDisplayName[..30]
+                        Value = displayName.Length <= 30
+                            ? displayName
+                            : displayName[..30]
                     }]
             },
             Metadata = new Dictionary<string, string>
             {
-                { "region", globalSettings.BaseServiceUri.CloudRegion }
-            },
-            Tax = new CustomerTaxOptions
-            {
-                ValidateLocation = StripeConstants.ValidateTaxLocationTiming.Immediately
-            },
-            TaxIdData = !string.IsNullOrEmpty(taxId)
-                ? [new CustomerTaxIdDataOptions { Type = taxInformation.GetTaxIdType(), Value = taxId }]
-                : null
+                ["organizationId"] = organization.Id.ToString(),
+                ["region"] = globalSettings.BaseServiceUri.CloudRegion
+            }
         };
-
-        var (type, token) = paymentSource;
-
-        if (string.IsNullOrEmpty(token))
-        {
-            logger.LogError(
-                "Cannot create customer for organization ({OrganizationID}) without a payment source token",
-                organization.Id);
-
-            throw new BillingException();
-        }
 
         var braintreeCustomerId = "";
 
-        // ReSharper disable once SwitchStatementHandlesSomeKnownEnumValuesWithDefault
-        switch (type)
+        if (customerSetup.IsBillable)
         {
-            case PaymentMethodType.BankAccount:
+            if (customerSetup.TokenizedPaymentSource is not
                 {
-                    var setupIntent =
-                        (await stripeAdapter.SetupIntentList(new SetupIntentListOptions { PaymentMethod = token }))
-                        .FirstOrDefault();
+                    Type: PaymentMethodType.BankAccount or PaymentMethodType.Card or PaymentMethodType.PayPal,
+                    Token: not null and not ""
+                })
+            {
+                logger.LogError(
+                    "Cannot create customer for organization ({OrganizationID}) without a valid payment source",
+                    organization.Id);
 
-                    if (setupIntent == null)
+                throw new BillingException();
+            }
+
+            if (customerSetup.TaxInformation is not { Country: not null and not "", PostalCode: not null and not "" })
+            {
+                logger.LogError(
+                    "Cannot create customer for organization ({OrganizationID}) without valid tax information",
+                    organization.Id);
+
+                throw new BillingException();
+            }
+
+            var (address, taxIdData) = customerSetup.TaxInformation.GetStripeOptions();
+
+            customerCreateOptions.Address = address;
+            customerCreateOptions.Tax = new CustomerTaxOptions
+            {
+                ValidateLocation = StripeConstants.ValidateTaxLocationTiming.Immediately
+            };
+            customerCreateOptions.TaxIdData = taxIdData;
+
+            var (paymentMethodType, paymentMethodToken) = customerSetup.TokenizedPaymentSource;
+
+            // ReSharper disable once SwitchStatementHandlesSomeKnownEnumValuesWithDefault
+            switch (paymentMethodType)
+            {
+                case PaymentMethodType.BankAccount:
                     {
-                        logger.LogError("Cannot create customer for organization ({OrganizationID}) without a setup intent for their bank account", organization.Id);
+                        var setupIntent =
+                            (await stripeAdapter.SetupIntentList(new SetupIntentListOptions { PaymentMethod = paymentMethodToken }))
+                            .FirstOrDefault();
 
+                        if (setupIntent == null)
+                        {
+                            logger.LogError("Cannot create customer for organization ({OrganizationID}) without a setup intent for their bank account", organization.Id);
+                            throw new BillingException();
+                        }
+
+                        await setupIntentCache.Set(organization.Id, setupIntent.Id);
+                        break;
+                    }
+                case PaymentMethodType.Card:
+                    {
+                        customerCreateOptions.PaymentMethod = paymentMethodToken;
+                        customerCreateOptions.InvoiceSettings.DefaultPaymentMethod = paymentMethodToken;
+                        break;
+                    }
+                case PaymentMethodType.PayPal:
+                    {
+                        braintreeCustomerId = await subscriberService.CreateBraintreeCustomer(organization, paymentMethodToken);
+                        customerCreateOptions.Metadata[BraintreeCustomerIdKey] = braintreeCustomerId;
+                        break;
+                    }
+                default:
+                    {
+                        logger.LogError("Cannot create customer for organization ({OrganizationID}) using payment method type ({PaymentMethodType}) as it is not supported", organization.Id, paymentMethodType.ToString());
                         throw new BillingException();
                     }
-
-                    await setupIntentCache.Set(organization.Id, setupIntent.Id);
-
-                    break;
-                }
-            case PaymentMethodType.Card:
-                {
-                    customerCreateOptions.PaymentMethod = token;
-                    customerCreateOptions.InvoiceSettings.DefaultPaymentMethod = token;
-                    break;
-                }
-            case PaymentMethodType.PayPal:
-                {
-                    braintreeCustomerId = await subscriberService.CreateBraintreeCustomer(organization, token);
-
-                    customerCreateOptions.Metadata[BraintreeCustomerIdKey] = braintreeCustomerId;
-
-                    break;
-                }
-            default:
-                {
-                    logger.LogError("Cannot create customer for organization ({OrganizationID}) using payment method type ({PaymentMethodType}) as it is not supported", organization.Id, type.ToString());
-
-                    throw new BillingException();
-                }
+            }
         }
 
         try
@@ -232,7 +220,6 @@ public class OrganizationBillingService(
                                                       StripeConstants.ErrorCodes.CustomerTaxLocationInvalid)
         {
             await Revert();
-
             throw new BadRequestException(
                 "Your location wasn't recognized. Please ensure your country and postal code are valid.");
         }
@@ -240,7 +227,6 @@ public class OrganizationBillingService(
                                                       StripeConstants.ErrorCodes.TaxIdInvalid)
         {
             await Revert();
-
             throw new BadRequestException(
                 "Your tax ID wasn't recognized for your selected country. Please ensure your country and tax ID are valid.");
         }
@@ -252,49 +238,51 @@ public class OrganizationBillingService(
 
         async Task Revert()
         {
-            // ReSharper disable once SwitchStatementMissingSomeEnumCasesNoDefault
-            switch (type)
+            if (customerSetup.IsBillable)
             {
-                case PaymentMethodType.BankAccount:
-                    {
-                        await setupIntentCache.Remove(organization.Id);
-                        break;
-                    }
-                case PaymentMethodType.PayPal:
-                    {
-                        await braintreeGateway.Customer.DeleteAsync(braintreeCustomerId);
-                        break;
-                    }
+                // ReSharper disable once SwitchStatementMissingSomeEnumCasesNoDefault
+                switch (customerSetup.TokenizedPaymentSource!.Type)
+                {
+                    case PaymentMethodType.BankAccount:
+                        {
+                            await setupIntentCache.Remove(organization.Id);
+                            break;
+                        }
+                    case PaymentMethodType.PayPal when !string.IsNullOrEmpty(braintreeCustomerId):
+                        {
+                            await braintreeGateway.Customer.DeleteAsync(braintreeCustomerId);
+                            break;
+                        }
+                }
             }
         }
     }
 
     private async Task<Subscription> CreateSubscriptionAsync(
-        Customer customer,
         Guid organizationId,
-        OrganizationPasswordManagerSubscriptionPurchase passwordManager,
-        PlanType planType,
-        OrganizationSecretsManagerSubscriptionPurchase secretsManager)
+        Customer customer,
+        SubscriptionSetup subscriptionSetup)
     {
-        var plan = StaticStore.GetPlan(planType);
+        var plan = subscriptionSetup.Plan;
 
-        if (passwordManager == null)
-        {
-            logger.LogError("Cannot create subscription for organization ({OrganizationID}) without password manager purchase information", organizationId);
-
-            throw new BillingException();
-        }
+        var passwordManagerOptions = subscriptionSetup.PasswordManagerOptions;
 
         var subscriptionItemOptionsList = new List<SubscriptionItemOptions>
         {
-            new ()
-            {
-                Price = plan.PasswordManager.StripeSeatPlanId,
-                Quantity = passwordManager.Seats
-            }
+            plan.HasNonSeatBasedPasswordManagerPlan()
+                ? new SubscriptionItemOptions
+                {
+                    Price = plan.PasswordManager.StripePlanId,
+                    Quantity = 1
+                }
+                : new SubscriptionItemOptions
+                {
+                    Price = plan.PasswordManager.StripeSeatPlanId,
+                    Quantity = passwordManagerOptions.Seats
+                }
         };
 
-        if (passwordManager.PremiumAccess)
+        if (passwordManagerOptions.PremiumAccess is true)
         {
             subscriptionItemOptionsList.Add(new SubscriptionItemOptions
             {
@@ -303,29 +291,31 @@ public class OrganizationBillingService(
             });
         }
 
-        if (passwordManager.Storage > 0)
+        if (passwordManagerOptions.Storage is > 0)
         {
             subscriptionItemOptionsList.Add(new SubscriptionItemOptions
             {
                 Price = plan.PasswordManager.StripeStoragePlanId,
-                Quantity = passwordManager.Storage
+                Quantity = passwordManagerOptions.Storage
             });
         }
 
-        if (secretsManager != null)
+        var secretsManagerOptions = subscriptionSetup.SecretsManagerOptions;
+
+        if (secretsManagerOptions != null)
         {
             subscriptionItemOptionsList.Add(new SubscriptionItemOptions
             {
                 Price = plan.SecretsManager.StripeSeatPlanId,
-                Quantity = secretsManager.Seats
+                Quantity = secretsManagerOptions.Seats
             });
 
-            if (secretsManager.ServiceAccounts > 0)
+            if (secretsManagerOptions.ServiceAccounts is > 0)
             {
                 subscriptionItemOptionsList.Add(new SubscriptionItemOptions
                 {
                     Price = plan.SecretsManager.StripeServiceAccountPlanId,
-                    Quantity = secretsManager.ServiceAccounts
+                    Quantity = secretsManagerOptions.ServiceAccounts
                 });
             }
         }
@@ -344,18 +334,10 @@ public class OrganizationBillingService(
                 ["organizationId"] = organizationId.ToString()
             },
             OffSession = true,
-            TrialPeriodDays = plan.TrialPeriodDays,
+            TrialPeriodDays = plan.TrialPeriodDays
         };
 
-        try
-        {
-            return await stripeAdapter.SubscriptionCreateAsync(subscriptionCreateOptions);
-        }
-        catch
-        {
-            await stripeAdapter.CustomerDeleteAsync(customer.Id);
-            throw;
-        }
+        return await stripeAdapter.SubscriptionCreateAsync(subscriptionCreateOptions);
     }
 
     private static bool IsOnSecretsManagerStandalone(
